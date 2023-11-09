@@ -9,36 +9,30 @@
 //    - open Azure Data Studio
 //    - run the command "Install 'azuredatastudio' command in PATH"
 {
-	"version": "0.2.0",
-    "configurations": [
-        {
-            "name": "Extension",
-            "type": "sqlopsExtensionHost",
-            "request": "launch",
-            "runtimeExecutable": "azuredatastudio",
-            "args": [
-                "--extensionDevelopmentPath=${workspaceFolder}"
-            ],
-            "outFiles": [
-                "${workspaceFolder}/out/**/*.js"
-            ],
-            "preLaunchTask": "npm: watch",
-            "timeout": 30000
-        },
-        {
-            "name": "Extension Tests",
-            "type": "sqlopsExtensionHost",
-            "request": "launch",
-            "runtimeExecutable": "azuredatastudio",
-            "args": [
-                "--extensionDevelopmentPath=${workspaceFolder}",
-                "--extensionTestsPath=${workspaceFolder}/out/test/suite"
-            ],
-            "outFiles": [
-                "${workspaceFolder}/out/test/**/*.js"
-            ],
-            "preLaunchTask": "npm: watch",
-            "timeout": 30000
-        }
-    ]
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Extension",
+      "type": "sqlopsExtensionHost",
+      "request": "launch",
+      "runtimeExecutable": "azuredatastudio",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
+      "outFiles": ["${workspaceFolder}/out/**/*.js"],
+      //"preLaunchTask": "npm: watch",
+      "timeout": 30000
+    },
+    {
+      "name": "Extension Tests",
+      "type": "sqlopsExtensionHost",
+      "request": "launch",
+      "runtimeExecutable": "azuredatastudio",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--extensionTestsPath=${workspaceFolder}/out/test/suite"
+      ],
+      "outFiles": ["${workspaceFolder}/out/test/**/*.js"],
+      "preLaunchTask": "npm: watch",
+      "timeout": 30000
+    }
+  ]
 }
