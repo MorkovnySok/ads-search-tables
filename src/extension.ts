@@ -7,6 +7,31 @@ export function activate(context: vscode.ExtensionContext) {
   adsLog.appendLine("ADS Search Tables Activated");
   let tableNames: string[] = [];
 
+  const completionProvider = vscode.languages.registerCompletionItemProvider(
+    "sql", // only for SQL files
+    {
+      provideCompletionItems(
+        document: vscode.TextDocument,
+        position: vscode.Position
+      ) {
+        // only after from or join keywords
+        const text = document.getText(
+          new vscode.Range(new vscode.Position(position.line, 0), position)
+        );
+        const match = text.match(/(from|join)\s+(\w*)$/i);
+        if (!match) {
+          return [];
+        }
+
+        return tableNames.map(
+          (x) => new vscode.CompletionItem(x, vscode.CompletionItemKind.Keyword)
+        );
+      },
+    }
+  );
+
+  context.subscriptions.push(completionProvider);
+
   context.subscriptions.push(
     vscode.commands.registerCommand(
       "ads-search-tables.helloWorld",
