@@ -18,7 +18,7 @@
       "runtimeExecutable": "azuredatastudio",
       "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
       "outFiles": ["${workspaceFolder}/out/**/*.js"],
-      //"preLaunchTask": "npm: watch",
+      "preLaunchTask": "npm: watch",
       "timeout": 30000
     },
     {
