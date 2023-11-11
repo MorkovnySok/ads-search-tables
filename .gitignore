@@ -2,3 +2,4 @@ out
 node_modules
 .ads-test/
 *.vsix
+package-lock.json
