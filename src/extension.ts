@@ -2,13 +2,25 @@
 import * as vscode from "vscode";
 import * as azdata from "azdata";
 
-var fullTableNamesSql = `
-SELECT CONCAT(s.name, '.', t.name) from sys.tables t
+interface TableName {
+  name: string;
+}
+
+interface RelationType {
+  parentTable: string;
+  parentColumn: string;
+  childTable: string;
+  childColumn: string;
+}
+
+const fullTableNamesSql = `
+SELECT CONCAT(s.name, '.', t.name) [name] from sys.tables t
 join sys.schemas s on s.schema_id = t.schema_id
 `;
 
-var relationsSql = `
-SELECT CONCAT(s.name, '.', TP.name, '.', CP.name, ' = ', s2.name, '.', RFK.name, '.', CR.name)
+const relationsSql = `
+SELECT CONCAT(s.name, '.', TP.name) [parentTable], CP.name parentColumn, 
+       CONCAT(s2.name, '.', RFK.name) [childTable], CR.name childColumn
 FROM sys.foreign_keys AS FK
     JOIN sys.tables AS TP ON FK.parent_object_id = TP.object_id
     JOIN sys.foreign_key_columns AS FKC ON FK.object_id = FKC.constraint_object_id
@@ -22,19 +34,19 @@ FROM sys.foreign_keys AS FK
 export function activate(context: vscode.ExtensionContext) {
   let adsLog = vscode.window.createOutputChannel("ADS Search Tables");
   adsLog.appendLine("ADS Search Tables Activated");
-  let tableNames: string[] = [];
-  let relations: string[] = [];
+  let tableNames: TableName[] = [];
+  let relations: RelationType[] = [];
 
   const completionProvider = vscode.languages.registerCompletionItemProvider(
     "sql", // only for SQL files
     {
       provideCompletionItems(
         document: vscode.TextDocument,
-        position: vscode.Position
+        position: vscode.Position,
       ) {
         // only after from or join keywords
         const text = document.getText(
-          new vscode.Range(new vscode.Position(position.line, 0), position)
+          new vscode.Range(new vscode.Position(position.line, 0), position),
         );
         const match = text.match(/(from|join)\s+(\w*)$/i);
         if (!match) {
@@ -42,10 +54,14 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         return tableNames.map(
-          (x) => new vscode.CompletionItem(x, vscode.CompletionItemKind.Keyword)
+          (x) =>
+            new vscode.CompletionItem(
+              x.name,
+              vscode.CompletionItemKind.Keyword,
+            ),
         );
       },
-    }
+    },
   );
 
   const joinSuggestionsProvider =
@@ -54,11 +70,11 @@ export function activate(context: vscode.ExtensionContext) {
       {
         provideCompletionItems(
           document: vscode.TextDocument,
-          position: vscode.Position
+          position: vscode.Position,
         ) {
           // only after ON keyword
           const text = document.getText(
-            new vscode.Range(new vscode.Position(position.line, 0), position)
+            new vscode.Range(new vscode.Position(position.line, 0), position),
           );
           const match = text.match(/on\s+(\w*)$/i);
           if (!match) {
@@ -66,25 +82,31 @@ export function activate(context: vscode.ExtensionContext) {
           }
 
           const usedTables = parseSqlQueries(document);
-          const suggestedRelations = relations.filter((r) =>
-            usedTables.some((t) => r.includes(t))
-          );
+          const suggestedRelations = relations.filter((r) => {
+            return (
+              usedTables.includes(r.parentTable) ||
+              usedTables.includes(r.childTable)
+            );
+          });
 
-          console.log(suggestedRelations);
-          const suggestionsSet = new Set<string>(suggestedRelations);
-          console.log(suggestionsSet);
+          const suggestionsSet = new Set<string>(
+            suggestedRelations.map(
+              (x) =>
+                `${x.parentTable}.${x.parentColumn} = ${x.childTable}.${x.childColumn}`,
+            ),
+          );
           const result: vscode.ProviderResult<
             | vscode.CompletionItem[]
             | vscode.CompletionList<vscode.CompletionItem>
           > = [];
           suggestionsSet.forEach((x) =>
             result.push(
-              new vscode.CompletionItem(x, vscode.CompletionItemKind.Value)
-            )
+              new vscode.CompletionItem(x, vscode.CompletionItemKind.Text),
+            ),
           );
           return result;
         },
-      }
+      },
     );
 
   context.subscriptions.push(completionProvider);
@@ -94,11 +116,10 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand(
       "ads-search-tables.helloWorld",
       async () => {
-        tableNames = await executeQuery(fullTableNamesSql);
-        relations = await executeQuery(relationsSql);
-        console.trace(relations);
-      }
-    )
+        tableNames = await executeQuery<TableName>(fullTableNamesSql);
+        relations = await executeQuery<RelationType>(relationsSql);
+      },
+    ),
   );
 
   context.subscriptions.push(
@@ -115,26 +136,51 @@ export function activate(context: vscode.ExtensionContext) {
           },
           (error) => {
             console.info(error);
-          }
+          },
         );
-      }
-    )
+      },
+    ),
   );
 }
 
 // this method is called when your extension is deactivated
 export function deactivate() {}
 
-async function executeQuery(sql: string): Promise<string[]> {
+interface IDbColumn {
+  columnName: string;
+}
+
+class GenericResultMapper<T extends object> {
+  constructor(private data: T) {}
+
+  mapResult(row: any[], columnInfo: IDbColumn[]): void {
+    columnInfo.forEach((column, index) => {
+      columnInfo.forEach((column, index) => {
+        const propertyName = column.columnName;
+        (this.data as any)[propertyName] = row[index].displayValue;
+      });
+    });
+  }
+}
+
+async function executeQuery<T extends object>(sql: string): Promise<T[]> {
   const connection = await azdata.connection.getCurrentConnection();
   const uri = await azdata.connection.getUriForConnection(
-    connection.connectionId
+    connection.connectionId,
   );
   const provider = azdata.dataprotocol.getProvidersByType(
-    azdata.DataProviderType.QueryProvider
+    azdata.DataProviderType.QueryProvider,
   )[0] as azdata.QueryProvider;
   const results = await provider.runQueryAndReturn(uri, sql);
-  return results.rows.map((row) => row[0].displayValue);
+
+  const rows: T[] = results.rows.map((row) => {
+    const rowObject = {} as T;
+    const resultMapper = new GenericResultMapper<T>(rowObject);
+    resultMapper.mapResult(row, results.columnInfo as IDbColumn[]);
+    return rowObject;
+  });
+
+  return rows;
 }
 
 function parseSqlQueries(document: vscode.TextDocument): string[] {
