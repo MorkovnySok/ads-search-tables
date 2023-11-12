@@ -2,7 +2,7 @@
   "name": "ads-search-tables",
   "displayName": "ads-search-tables",
   "description": "",
-  "publisher": "Microsoft",
+  "publisher": "Artem",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.39.0",
