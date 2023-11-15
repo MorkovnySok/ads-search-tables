@@ -84,7 +84,7 @@ export function activate(context: vscode.ExtensionContext) {
           const usedTables = parseSqlQueries(document);
           const suggestedRelations = relations.filter((r) => {
             return (
-              usedTables.includes(r.parentTable) ||
+              usedTables.includes(r.parentTable) &&
               usedTables.includes(r.childTable)
             );
           });
@@ -155,10 +155,8 @@ class GenericResultMapper<T extends object> {
 
   mapResult(row: any[], columnInfo: IDbColumn[]): void {
     columnInfo.forEach((column, index) => {
-      columnInfo.forEach((column, index) => {
-        const propertyName = column.columnName;
-        (this.data as any)[propertyName] = row[index].displayValue;
-      });
+      const propertyName = column.columnName;
+      (this.data as any)[propertyName] = row[index].displayValue;
     });
   }
 }
@@ -173,14 +171,12 @@ async function executeQuery<T extends object>(sql: string): Promise<T[]> {
   )[0] as azdata.QueryProvider;
   const results = await provider.runQueryAndReturn(uri, sql);
 
-  const rows: T[] = results.rows.map((row) => {
+  return results.rows.map((row) => {
     const rowObject = {} as T;
     const resultMapper = new GenericResultMapper<T>(rowObject);
     resultMapper.mapResult(row, results.columnInfo as IDbColumn[]);
     return rowObject;
   });
-
-  return rows;
 }
 
 function parseSqlQueries(document: vscode.TextDocument): string[] {
