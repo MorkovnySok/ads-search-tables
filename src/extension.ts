@@ -82,10 +82,13 @@ export function activate(context: vscode.ExtensionContext) {
           }
 
           const usedTables = parseSqlQueries(document, position);
+          const currentTable = usedTables.pop();
           const suggestedRelations = relations.filter((r) => {
             return (
-              usedTables.includes(r.parentTable) &&
-              usedTables.includes(r.childTable)
+              (usedTables.includes(r.parentTable) &&
+                r.childTable === currentTable) ||
+              (usedTables.includes(r.childTable) &&
+                r.parentTable === currentTable)
             );
           });
 
