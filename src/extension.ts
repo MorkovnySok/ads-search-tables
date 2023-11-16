@@ -57,7 +57,7 @@ export function activate(context: vscode.ExtensionContext) {
           (x) =>
             new vscode.CompletionItem(
               `${x.name} ${getAliasFromTableName(x.name)}`,
-              vscode.CompletionItemKind.Keyword,
+              vscode.CompletionItemKind.TypeParameter,
             ),
         );
       },
@@ -76,7 +76,7 @@ export function activate(context: vscode.ExtensionContext) {
           const text = document.getText(
             new vscode.Range(new vscode.Position(position.line, 0), position),
           );
-          const match = text.match(/on\s+(\w*)$/i);
+          const match = text.replace("=", "").match(/on\s+(\w*)$/i);
           if (!match) {
             return [];
           }
@@ -103,12 +103,17 @@ export function activate(context: vscode.ExtensionContext) {
           > = [];
           suggestionsSet.forEach((x) =>
             result.push(
-              new vscode.CompletionItem(x, vscode.CompletionItemKind.Text),
+              new vscode.CompletionItem(
+                x,
+                vscode.CompletionItemKind.TypeParameter,
+              ),
             ),
           );
           return result;
         },
       },
+      "=",
+      " ",
     );
 
   context.subscriptions.push(completionProvider);
