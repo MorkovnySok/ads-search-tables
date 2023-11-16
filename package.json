@@ -12,6 +12,7 @@
     "Other"
   ],
   "activationEvents": [
+    "onLanguage:sql",
     "onCommand:ads-search-tables.helloWorld",
     "onCommand:ads-search-tables.showCurrentConnection"
   ],
@@ -20,11 +21,7 @@
     "commands": [
       {
         "command": "ads-search-tables.helloWorld",
-        "title": "Hello World"
-      },
-      {
-        "command": "ads-search-tables.showCurrentConnection",
-        "title": "Show Current Connection"
+        "title": "Search tables: Load for current connection"
       }
     ]
   },

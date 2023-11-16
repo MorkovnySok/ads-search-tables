@@ -56,7 +56,7 @@ export function activate(context: vscode.ExtensionContext) {
         return tableNames.map(
           (x) =>
             new vscode.CompletionItem(
-              x.name,
+              `${x.name} ${getAliasFromTableName(x.name)}`,
               vscode.CompletionItemKind.Keyword,
             ),
         );
@@ -81,7 +81,7 @@ export function activate(context: vscode.ExtensionContext) {
             return [];
           }
 
-          const usedTables = parseSqlQueries(document);
+          const usedTables = parseSqlQueries(document, position);
           const suggestedRelations = relations.filter((r) => {
             return (
               usedTables.includes(r.parentTable) &&
@@ -92,7 +92,9 @@ export function activate(context: vscode.ExtensionContext) {
           const suggestionsSet = new Set<string>(
             suggestedRelations.map(
               (x) =>
-                `${x.parentTable}.${x.parentColumn} = ${x.childTable}.${x.childColumn}`,
+                `${getAliasFromTableName(x.parentTable)}.${
+                  x.parentColumn
+                } = ${getAliasFromTableName(x.childTable)}.${x.childColumn}`,
             ),
           );
           const result: vscode.ProviderResult<
@@ -118,26 +120,6 @@ export function activate(context: vscode.ExtensionContext) {
       async () => {
         tableNames = await executeQuery<TableName>(fullTableNamesSql);
         relations = await executeQuery<RelationType>(relationsSql);
-      },
-    ),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "ads-search-tables.showCurrentConnection",
-      () => {
-        azdata.connection.getCurrentConnection().then(
-          (connection) => {
-            console.log(connection);
-            let connectionId = connection
-              ? connection.connectionId
-              : "No connection found!";
-            vscode.window.showInformationMessage(connectionId);
-          },
-          (error) => {
-            console.info(error);
-          },
-        );
       },
     ),
   );
@@ -179,17 +161,68 @@ async function executeQuery<T extends object>(sql: string): Promise<T[]> {
   });
 }
 
-function parseSqlQueries(document: vscode.TextDocument): string[] {
+function parseSqlQueries(
+  document: vscode.TextDocument,
+  position: vscode.Position,
+): string[] {
   const sqlText = document.getText();
-  const tableRegex = /\b(?:from|join)\s+([^\s,]+)/gi;
-  let match;
   const tablesUsed: string[] = [];
 
-  while ((match = tableRegex.exec(sqlText)) !== null) {
-    // Extract table names from the regex match
-    const tableName = match[1];
-    tablesUsed.push(tableName);
+  const lines = sqlText.split("\n");
+  const currentLine = position.line;
+
+  let queryStart: number | null = null;
+
+  // Iterate from the cursor position to the beginning of the document
+  for (let i = currentLine; i >= 0; i--) {
+    const line = lines[i].trim();
+    const selectIndex = line.search(/\b(?:SELECT|UPDATE|DELETE)\b/i);
+
+    if (selectIndex !== -1) {
+      queryStart = i;
+      break;
+    }
+  }
+
+  if (queryStart === null) {
+    return [];
+  }
+
+  const queryLines = lines.slice(queryStart, currentLine + 1);
+  const query = queryLines.join(" ");
+
+  // Use a simple parser to extract table names
+  const words = query.split(/\s+/);
+  let isFromJoinClause = false;
+
+  for (const word of words) {
+    if (isFromJoinClause && word !== "") {
+      tablesUsed.push(word);
+      isFromJoinClause = false;
+    }
+
+    if (/\b(?:FROM|JOIN)\b/i.test(word)) {
+      isFromJoinClause = true;
+    }
   }
 
   return tablesUsed;
+}
+
+function getAliasFromTableName(tableName: string): string {
+  const nameParts = tableName.split(".");
+  let tableNameWithoutSchema = undefined;
+  if (nameParts.length > 1) {
+    tableNameWithoutSchema = nameParts[1];
+  } else {
+    tableNameWithoutSchema = nameParts[0];
+  }
+  // returns every capital letter in the table name
+  const regex = /[A-Z]/g;
+  const matches = tableNameWithoutSchema.match(regex);
+  if (matches) {
+    return matches.join("");
+  } else {
+    return tableNameWithoutSchema;
+  }
 }
