@@ -76,43 +76,21 @@ export function activate(context: vscode.ExtensionContext) {
           const text = document.getText(
             new vscode.Range(new vscode.Position(position.line, 0), position),
           );
-          const match = text.replace("=", "").match(/on\s+(\w*)$/i);
-          if (!match) {
+          const onWordMatch = text.replace("=", "").match(/on\s+(\w*)$/i);
+          const joinWordMatch = text.replace("=", "").match(/join\s+(\w*)$/i);
+          if (!onWordMatch && !joinWordMatch) {
             return [];
           }
 
           const usedTables = parseSqlQueries(document, position);
-          const currentTable = usedTables.pop();
-          const suggestedRelations = relations.filter((r) => {
-            return (
-              (usedTables.includes(r.parentTable) &&
-                r.childTable === currentTable) ||
-              (usedTables.includes(r.childTable) &&
-                r.parentTable === currentTable)
-            );
-          });
 
-          const suggestionsSet = new Set<string>(
-            suggestedRelations.map(
-              (x) =>
-                `${getAliasFromTableName(x.parentTable)}.${
-                  x.parentColumn
-                } = ${getAliasFromTableName(x.childTable)}.${x.childColumn}`,
-            ),
-          );
-          const result: vscode.ProviderResult<
-            | vscode.CompletionItem[]
-            | vscode.CompletionList<vscode.CompletionItem>
-          > = [];
-          suggestionsSet.forEach((x) =>
-            result.push(
-              new vscode.CompletionItem(
-                x,
-                vscode.CompletionItemKind.TypeParameter,
-              ),
-            ),
-          );
-          return result;
+          if (joinWordMatch) {
+            return processJoinSuggestion(relations, usedTables);
+          }
+
+          if (onWordMatch) {
+            return processOnWordSuggestion(relations, usedTables);
+          }
         },
       },
       "=",
@@ -233,4 +211,66 @@ function getAliasFromTableName(tableName: string): string {
   } else {
     return tableNameWithoutSchema;
   }
+}
+
+function processJoinSuggestion(
+  relations: RelationType[],
+  usedTables: string[],
+): vscode.ProviderResult<
+  vscode.CompletionItem[] | vscode.CompletionList<vscode.CompletionItem>
+> {
+  const suggestedRelations = relations.filter((r) => {
+    return (
+      usedTables.includes(r.parentTable) || usedTables.includes(r.childTable)
+    );
+  });
+
+  const suggestionsSet = new Set<string>(
+    suggestedRelations.map(
+      (x) =>
+        `${x.childTable} ${getAliasFromTableName(x.childTable)} ON ${getAliasFromTableName(x.parentTable)}.${
+          x.parentColumn
+        } = ${getAliasFromTableName(x.childTable)}.${x.childColumn}`,
+    ),
+  );
+  const result: vscode.ProviderResult<
+    vscode.CompletionItem[] | vscode.CompletionList<vscode.CompletionItem>
+  > = [];
+  suggestionsSet.forEach((x) =>
+    result.push(
+      new vscode.CompletionItem(x, vscode.CompletionItemKind.TypeParameter),
+    ),
+  );
+  return result;
+}
+
+function processOnWordSuggestion(
+  relations: RelationType[],
+  usedTables: string[],
+) {
+  const currentTable = usedTables.pop();
+  const suggestedRelations = relations.filter((r) => {
+    return (
+      (usedTables.includes(r.parentTable) && r.childTable === currentTable) ||
+      (usedTables.includes(r.childTable) && r.parentTable === currentTable)
+    );
+  });
+
+  const suggestionsSet = new Set<string>(
+    suggestedRelations.map(
+      (x) =>
+        `${getAliasFromTableName(x.parentTable)}.${
+          x.parentColumn
+        } = ${getAliasFromTableName(x.childTable)}.${x.childColumn}`,
+    ),
+  );
+  const result: vscode.ProviderResult<
+    vscode.CompletionItem[] | vscode.CompletionList<vscode.CompletionItem>
+  > = [];
+  suggestionsSet.forEach((x) =>
+    result.push(
+      new vscode.CompletionItem(x, vscode.CompletionItemKind.TypeParameter),
+    ),
+  );
+  return result;
 }
