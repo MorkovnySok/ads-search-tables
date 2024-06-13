@@ -1,43 +1,10 @@
 "use strict";
 import * as vscode from "vscode";
 import * as azdata from "azdata";
-
-interface Table {
-  name: string;
-  alias?: string;
-}
-
-interface RelationTypeQuery {
-  parentTable: string;
-  parentColumn: string;
-  childTable: string;
-  childColumn: string;
-}
-
-interface RelationType {
-  parentTable: Table;
-  parentColumn: string;
-  childTable: Table;
-  childColumn: string;
-}
-
-const fullTableNamesSql = `
-SELECT CONCAT(s.name, '.', t.name) [name] from sys.tables t
-join sys.schemas s on s.schema_id = t.schema_id
-`;
-
-const relationsSql = `
-SELECT CONCAT(s.name, '.', TP.name) [parentTable], CP.name parentColumn, 
-       CONCAT(s2.name, '.', RFK.name) [childTable], CR.name childColumn
-FROM sys.foreign_keys AS FK
-    JOIN sys.tables AS TP ON FK.parent_object_id = TP.object_id
-    JOIN sys.foreign_key_columns AS FKC ON FK.object_id = FKC.constraint_object_id
-    JOIN sys.columns AS CP ON FKC.parent_object_id = CP.object_id AND FKC.parent_column_id = CP.column_id
-    JOIN sys.columns AS CR ON FKC.referenced_object_id = CR.object_id AND FKC.referenced_column_id = CR.column_id
-    JOIN sys.tables AS RFK ON FKC.referenced_object_id = RFK.object_id
-    JOIN sys.schemas s on s.schema_id = TP.schema_id
-    JOIN sys.schemas s2 on s2.schema_id = RFK.schema_id
-`;
+import { fullTableNamesSql, relationsSql } from "./sql";
+import { buildRelations } from "./relationsBuilder";
+import { RelationType, RelationTypeQuery, Table } from "./models";
+import { processJoinSuggestion } from "./suggestionProviders/joinSuggestion";
 
 let tableNames: Table[] = [];
 let relations: RelationType[] = [];
@@ -63,7 +30,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         return tableNames.map((x) => {
-          const alias = getAliasFromTableName(x);
+          const alias = setAliasFromTableName(x);
           return new vscode.CompletionItem(
             `${x.name} ${alias}`,
             vscode.CompletionItemKind.TypeParameter,
@@ -93,7 +60,7 @@ export function activate(context: vscode.ExtensionContext) {
 
           const usedTables = parseSqlQueries(document, position);
           for (const usedTable of usedTables) {
-            usedTable.alias = getAliasFromTableName(usedTable, usedTables);
+            usedTable.alias = setAliasFromTableName(usedTable, usedTables);
           }
 
           if (joinWordMatch) {
@@ -101,7 +68,7 @@ export function activate(context: vscode.ExtensionContext) {
           }
 
           if (onWordMatch) {
-            return processOnWordSuggestion(relations, usedTables);
+            // return processOnWordSuggestion(relations, usedTables);
           }
         },
       },
@@ -117,16 +84,8 @@ export function activate(context: vscode.ExtensionContext) {
       "ads-search-tables.helloWorld",
       async () => {
         tableNames = await executeQuery<Table>(fullTableNamesSql);
-        const relationsResult =
-          await executeQuery<RelationTypeQuery>(relationsSql);
-        relations = relationsResult.map((x) => {
-          return {
-            childColumn: x.childColumn,
-            childTable: { name: x.childTable, alias: "" },
-            parentColumn: x.parentColumn,
-            parentTable: { name: x.parentTable, alias: "" },
-          };
-        });
+        const sqlData = await executeQuery<RelationTypeQuery>(relationsSql);
+        relations = buildRelations(sqlData);
       },
     ),
   );
@@ -220,7 +179,7 @@ function parseSqlQueries(
   });
 }
 
-function getAliasFromTableName(
+export function setAliasFromTableName(
   table: Table,
   tablesUsedInQuery?: Table[] | undefined,
 ): string {
@@ -243,76 +202,14 @@ function getAliasFromTableName(
       alias = aliasUsages > 0 ? alias + aliasUsages.toString() : alias;
     }
     table.alias = alias;
-    relations
-      .filter((x) => x.parentTable.name === table.name)
-      .forEach((x) => (x.parentTable.alias = table.alias));
+    console.log(table.name, table.alias);
+    // relations
+    //   .filter((x) => x.table.name === table.name)
+    //   .forEach((x) => (x.table.alias = table.alias));
 
     return table.alias;
   } else {
     table.alias = tableNameWithoutSchema;
     return table.alias;
   }
-}
-
-function processJoinSuggestion(
-  relations: RelationType[],
-  usedTables: Table[],
-): vscode.ProviderResult<
-  vscode.CompletionItem[] | vscode.CompletionList<vscode.CompletionItem>
-> {
-  const suggestedRelations = relations.filter((r) => {
-    return (
-      usedTables.map((x) => x.name).includes(r.parentTable.name) ||
-      usedTables.map((x) => x.name).includes(r.childTable.name)
-    );
-  });
-
-  const suggestionsSet = new Set<string>(
-    suggestedRelations.map((x) => {
-      const childAlias = getAliasFromTableName(x.childTable, usedTables);
-      return `${x.childTable.name} ${childAlias} ON ${x.parentTable.alias}.${
-        x.parentColumn
-      } = ${childAlias}.${x.childColumn}`;
-    }),
-  );
-  const result: vscode.ProviderResult<
-    vscode.CompletionItem[] | vscode.CompletionList<vscode.CompletionItem>
-  > = [];
-  suggestionsSet.forEach((x) =>
-    result.push(
-      new vscode.CompletionItem(x, vscode.CompletionItemKind.TypeParameter),
-    ),
-  );
-  return result;
-}
-
-function processOnWordSuggestion(
-  relations: RelationType[],
-  usedTables: Table[],
-) {
-  const currentTable = usedTables.pop();
-  const suggestedRelations = relations.filter((r) => {
-    return (
-      (usedTables.includes(r.parentTable) && r.childTable === currentTable) ||
-      (usedTables.includes(r.childTable) && r.parentTable === currentTable)
-    );
-  });
-
-  const suggestionsSet = new Set<string>(
-    suggestedRelations.map(
-      (x) =>
-        `${getAliasFromTableName(x.parentTable, usedTables)}.${
-          x.parentColumn
-        } = ${getAliasFromTableName(x.childTable, usedTables)}.${x.childColumn}`,
-    ),
-  );
-  const result: vscode.ProviderResult<
-    vscode.CompletionItem[] | vscode.CompletionList<vscode.CompletionItem>
-  > = [];
-  suggestionsSet.forEach((x) =>
-    result.push(
-      new vscode.CompletionItem(x, vscode.CompletionItemKind.TypeParameter),
-    ),
-  );
-  return result;
 }
