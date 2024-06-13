@@ -4,7 +4,7 @@ export class Table {
   name: string;
   _alias?: string;
 
-  get alias() {
+  get alias(): string {
     return this._alias ?? setAliasFromTableName(this);
   }
   set alias(alias: string) {

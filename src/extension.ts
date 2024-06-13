@@ -202,10 +202,6 @@ export function setAliasFromTableName(
       alias = aliasUsages > 0 ? alias + aliasUsages.toString() : alias;
     }
     table.alias = alias;
-    console.log(table.name, table.alias);
-    // relations
-    //   .filter((x) => x.table.name === table.name)
-    //   .forEach((x) => (x.table.alias = table.alias));
 
     return table.alias;
   } else {
