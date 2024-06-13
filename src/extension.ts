@@ -2,14 +2,22 @@
 import * as vscode from "vscode";
 import * as azdata from "azdata";
 
-interface TableName {
+interface Table {
   name: string;
+  alias?: string;
 }
 
-interface RelationType {
+interface RelationTypeQuery {
   parentTable: string;
   parentColumn: string;
   childTable: string;
+  childColumn: string;
+}
+
+interface RelationType {
+  parentTable: Table;
+  parentColumn: string;
+  childTable: Table;
   childColumn: string;
 }
 
@@ -31,11 +39,12 @@ FROM sys.foreign_keys AS FK
     JOIN sys.schemas s2 on s2.schema_id = RFK.schema_id
 `;
 
+let tableNames: Table[] = [];
+let relations: RelationType[] = [];
+
 export function activate(context: vscode.ExtensionContext) {
   let adsLog = vscode.window.createOutputChannel("ADS Search Tables");
   adsLog.appendLine("ADS Search Tables Activated");
-  let tableNames: TableName[] = [];
-  let relations: RelationType[] = [];
 
   const completionProvider = vscode.languages.registerCompletionItemProvider(
     "sql", // only for SQL files
@@ -53,13 +62,13 @@ export function activate(context: vscode.ExtensionContext) {
           return [];
         }
 
-        return tableNames.map(
-          (x) =>
-            new vscode.CompletionItem(
-              `${x.name} ${getAliasFromTableName(x.name)}`,
-              vscode.CompletionItemKind.TypeParameter,
-            ),
-        );
+        return tableNames.map((x) => {
+          const alias = getAliasFromTableName(x);
+          return new vscode.CompletionItem(
+            `${x.name} ${alias}`,
+            vscode.CompletionItemKind.TypeParameter,
+          );
+        });
       },
     },
   );
@@ -83,6 +92,9 @@ export function activate(context: vscode.ExtensionContext) {
           }
 
           const usedTables = parseSqlQueries(document, position);
+          for (const usedTable of usedTables) {
+            usedTable.alias = getAliasFromTableName(usedTable, usedTables);
+          }
 
           if (joinWordMatch) {
             return processJoinSuggestion(relations, usedTables);
@@ -104,8 +116,17 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand(
       "ads-search-tables.helloWorld",
       async () => {
-        tableNames = await executeQuery<TableName>(fullTableNamesSql);
-        relations = await executeQuery<RelationType>(relationsSql);
+        tableNames = await executeQuery<Table>(fullTableNamesSql);
+        const relationsResult =
+          await executeQuery<RelationTypeQuery>(relationsSql);
+        relations = relationsResult.map((x) => {
+          return {
+            childColumn: x.childColumn,
+            childTable: { name: x.childTable, alias: "" },
+            parentColumn: x.parentColumn,
+            parentTable: { name: x.parentTable, alias: "" },
+          };
+        });
       },
     ),
   );
@@ -150,7 +171,7 @@ async function executeQuery<T extends object>(sql: string): Promise<T[]> {
 function parseSqlQueries(
   document: vscode.TextDocument,
   position: vscode.Position,
-): string[] {
+): Table[] {
   const sqlText = document.getText();
   const tablesUsed: string[] = [];
 
@@ -192,12 +213,19 @@ function parseSqlQueries(
     }
   }
 
-  return tablesUsed;
+  return tablesUsed.map((x) => {
+    return {
+      name: x,
+    } as Table;
+  });
 }
 
-function getAliasFromTableName(tableName: string): string {
-  const nameParts = tableName.split(".");
-  let tableNameWithoutSchema = undefined;
+function getAliasFromTableName(
+  table: Table,
+  tablesUsedInQuery?: Table[] | undefined,
+): string {
+  const nameParts = table.name.split(".");
+  let tableNameWithoutSchema;
   if (nameParts.length > 1) {
     tableNameWithoutSchema = nameParts[1];
   } else {
@@ -207,31 +235,45 @@ function getAliasFromTableName(tableName: string): string {
   const regex = /[A-Z]/g;
   const matches = tableNameWithoutSchema.match(regex);
   if (matches) {
-    return matches.join("");
+    let alias = matches.join("");
+    if (tablesUsedInQuery) {
+      const aliasUsages = tablesUsedInQuery.filter(
+        (x) => x.alias === alias,
+      ).length;
+      alias = aliasUsages > 0 ? alias + aliasUsages.toString() : alias;
+    }
+    table.alias = alias;
+    relations
+      .filter((x) => x.parentTable.name === table.name)
+      .forEach((x) => (x.parentTable.alias = table.alias));
+
+    return table.alias;
   } else {
-    return tableNameWithoutSchema;
+    table.alias = tableNameWithoutSchema;
+    return table.alias;
   }
 }
 
 function processJoinSuggestion(
   relations: RelationType[],
-  usedTables: string[],
+  usedTables: Table[],
 ): vscode.ProviderResult<
   vscode.CompletionItem[] | vscode.CompletionList<vscode.CompletionItem>
 > {
   const suggestedRelations = relations.filter((r) => {
     return (
-      usedTables.includes(r.parentTable) || usedTables.includes(r.childTable)
+      usedTables.map((x) => x.name).includes(r.parentTable.name) ||
+      usedTables.map((x) => x.name).includes(r.childTable.name)
     );
   });
 
   const suggestionsSet = new Set<string>(
-    suggestedRelations.map(
-      (x) =>
-        `${x.childTable} ${getAliasFromTableName(x.childTable)} ON ${getAliasFromTableName(x.parentTable)}.${
-          x.parentColumn
-        } = ${getAliasFromTableName(x.childTable)}.${x.childColumn}`,
-    ),
+    suggestedRelations.map((x) => {
+      const childAlias = getAliasFromTableName(x.childTable, usedTables);
+      return `${x.childTable.name} ${childAlias} ON ${x.parentTable.alias}.${
+        x.parentColumn
+      } = ${childAlias}.${x.childColumn}`;
+    }),
   );
   const result: vscode.ProviderResult<
     vscode.CompletionItem[] | vscode.CompletionList<vscode.CompletionItem>
@@ -246,7 +288,7 @@ function processJoinSuggestion(
 
 function processOnWordSuggestion(
   relations: RelationType[],
-  usedTables: string[],
+  usedTables: Table[],
 ) {
   const currentTable = usedTables.pop();
   const suggestedRelations = relations.filter((r) => {
@@ -259,9 +301,9 @@ function processOnWordSuggestion(
   const suggestionsSet = new Set<string>(
     suggestedRelations.map(
       (x) =>
-        `${getAliasFromTableName(x.parentTable)}.${
+        `${getAliasFromTableName(x.parentTable, usedTables)}.${
           x.parentColumn
-        } = ${getAliasFromTableName(x.childTable)}.${x.childColumn}`,
+        } = ${getAliasFromTableName(x.childTable, usedTables)}.${x.childColumn}`,
     ),
   );
   const result: vscode.ProviderResult<
